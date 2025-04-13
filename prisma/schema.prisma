@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  username   String   @unique
+  password   String
+  role       Role
+  developer  User?    @relation("DevToBidders", fields: [developerId], references: [id])
+  developerId String?
+  bidders    User[]   @relation("DevToBidders")
+  openaiToken String?
+  gptPrompt   String?
+  GeneratedResume GeneratedResume[]
+}
+
+model GeneratedResume {
+  id                String   @id @default(cuid())
+  bidderId          String
+  bidder            User     @relation(fields: [bidderId], references: [id])
+  date              String
+  name              String   // without extension
+  jobDescriptionUrl String?
+}
+
+
+enum Role {
+  admin
+  developer
+  bidder
+}
