@@ -44,35 +44,58 @@ router.get("/bidder-files/:id", auth(["developer"]), async (req, res) => {
     const bidderId = req.params.id;
     const devId = req.user.id;
 
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    // Validate relationship
     const bidder = await prisma.user.findUnique({ where: { id: bidderId } });
     if (!bidder || bidder.developerId !== devId) {
       console.log("Unauthorized access to bidder:", bidderId, " -- developerId:", devId);
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const resumes = await prisma.generatedResume.findMany({
+    // Fetch total and paginated files
+    const [total, resumes] = await Promise.all([
+      prisma.generatedResume.count({ where: { bidderId } }),
+
+      prisma.generatedResume.findMany({
+        where: { bidderId },
+        orderBy: { date: "desc" },
+        skip: offset,
+        take: limit,
+      }),
+    ]);
+
+    const grouped = await prisma.generatedResume.groupBy({
+      by: ["date"],
       where: { bidderId },
-      orderBy: { date: "desc" },
+      _count: { date: true },
     });
 
-    const fileMap = {};
-    for (const resume of resumes) {
-      const date = resume.date;
+    const dateCounts = {};
+    grouped.forEach((g) => {
+      dateCounts[g.date] = g._count.date;
+    });
 
-      if (!fileMap[date]) fileMap[date] = [];
+    const files = resumes.map((resume) => ({
+      name: resume.name,
+      jdUrl: resume.jobDescriptionUrl,
+      date: resume.date,
+      url: `/uploads/${bidderId}/${resume.date}/${resume.name}`, // optional if needed
+    }));
 
-      fileMap[date].push({
-        name: resume.name,
-        jdUrl: resume.jobDescriptionUrl,
-      });
-    }
-
-    res.json(fileMap);
+    res.json({
+      files,
+      totalPages: Math.ceil(total / limit),
+      dateCounts,
+    });
   } catch (error) {
     console.error("Error fetching bidder's resumes:", error);
     res.status(500).json({ message: "Failed to fetch bidder's resumes." });
   }
 });
+
 
 // This route is used to delete a generated resume file for a bidder
 router.post("/delete-bidder-file/:id", auth(["developer"]), async (req, res) => {

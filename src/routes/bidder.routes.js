@@ -11,31 +11,50 @@ router.get('/files', auth(['bidder']), async (req, res) => {
   try {
     const bidderId = req.user.id;
 
-    const records = await prisma.generatedResume.findMany({
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const [total, records] = await Promise.all([
+      prisma.generatedResume.count({ where: { bidderId } }),
+
+      prisma.generatedResume.findMany({
+        where: { bidderId },
+        orderBy: { date: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+    ]);
+
+    const files = records.map((record) => ({
+      name: record.name,
+      jdUrl: record.jobDescriptionUrl,
+      date: record.date,
+      url: `/uploads/${bidderId}/${record.date}/${record.name}`, // optional
+    }));
+
+    const dateCountsRaw = await prisma.generatedResume.groupBy({
+      by: ['date'],
       where: { bidderId },
-      orderBy: { date: 'desc' },
+      _count: { date: true },
+    });
+    
+    const dateCounts = {};
+    dateCountsRaw.forEach((entry) => {
+      dateCounts[entry.date] = entry._count.date;
     });
 
-    const fileMap = {};
-
-    for (const record of records) {
-      const date = record.date;
-      const name = record.name; // get filename without extension
-
-      if (!fileMap[date]) fileMap[date] = [];
-
-      fileMap[date].push({
-        name: name,
-        jdUrl: record.jobDescriptionUrl,
-      });
-    }
-
-    res.json(fileMap);
+    res.json({
+      files,
+      totalPages: Math.ceil(total / limit),
+      dateCounts,
+    });
   } catch (err) {
-    console.error('Error loading files:', err);
-    res.status(500).json({ message: 'Failed to fetch generated resumes' });
+    console.error('Error loading paginated files:', err);
+    res.status(500).json({ message: 'Failed to fetch files' });
   }
 });
+
 
 router.post("/delete-file", auth(["bidder"]), async (req, res) => {
   try {
